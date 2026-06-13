@@ -200,6 +200,10 @@ function isPermissionError(error) {
   return error?.name === "NotAllowedError" || error?.name === "SecurityError";
 }
 
+function frontCameraZoomConstraint() {
+  return state.facingMode === "user" ? { zoom: { ideal: 1 } } : {};
+}
+
 async function requestCameraStream() {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("此瀏覽器不支援 navigator.mediaDevices.getUserMedia");
@@ -211,14 +215,16 @@ async function requestCameraStream() {
       facingMode: { ideal: state.facingMode },
       width: { ideal: preferredSize.width },
       height: { ideal: preferredSize.height },
-      frameRate: { ideal: 30 }
+      frameRate: { ideal: 30 },
+      ...frontCameraZoomConstraint()
     },
     audio: false
   };
   const relaxed = {
     video: {
       facingMode: { ideal: state.facingMode },
-      frameRate: { ideal: 30 }
+      frameRate: { ideal: 30 },
+      ...frontCameraZoomConstraint()
     },
     audio: false
   };
@@ -236,6 +242,24 @@ async function requestCameraStream() {
       logEvent(`指定鏡頭不可用，改用預設相機：${cameraErrorMessage(secondError)}`);
       return navigator.mediaDevices.getUserMedia(basic);
     }
+  }
+}
+
+async function applyFrontCameraWideAnglePreference() {
+  if (state.facingMode !== "user") return;
+  const track = state.stream?.getVideoTracks?.()[0];
+  if (!track?.getCapabilities || !track.applyConstraints) return;
+  const capabilities = track.getCapabilities();
+  const settings = track.getSettings?.() || {};
+  const minZoom = capabilities.zoom?.min;
+  if (!Number.isFinite(minZoom)) return;
+  const currentZoom = Number.isFinite(settings.zoom) ? settings.zoom : Infinity;
+  if (currentZoom <= minZoom + 0.001) return;
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: minZoom }] });
+    logEvent(`前鏡頭已套用最廣視角 zoom ${minZoom}`);
+  } catch (error) {
+    logEvent(`前鏡頭廣角設定不可用：${error.message || "zoom unsupported"}`);
   }
 }
 
@@ -752,6 +776,7 @@ async function startCamera() {
   state.stream = await requestCameraStream();
   els.video.srcObject = state.stream;
   await els.video.play();
+  await applyFrontCameraWideAnglePreference();
   clearDelayBuffer();
   state.smoothedFaceCenter = null;
   state.delayRecorderSupported = !!window.MediaRecorder && !isIOSDevice();
