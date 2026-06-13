@@ -209,7 +209,6 @@ select {
   display: block;
   width: 100%;
   height: auto;
-  max-height: calc(100svh - 250px);
   aspect-ratio: var(--camera-aspect-ratio, 16 / 9);
   object-fit: contain;
   background: #020617;

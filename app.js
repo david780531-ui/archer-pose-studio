@@ -100,6 +100,7 @@ const state = {
   confidence: 0,
   lastPhaseAt: 0,
   lastAnalysisAt: 0,
+  cameraAspectRatio: "",
   lastLandmarks: null,
   lastDrawWrist: null,
   lastAnchorAt: 0,
@@ -558,6 +559,7 @@ function stopCamera() {
   state.stream = null;
   clearDelayBuffer();
   state.lastLandmarks = null;
+  state.cameraAspectRatio = "";
   els.cameraBtn.textContent = "啟動相機";
   clearCanvas();
   setStatus();
@@ -575,9 +577,12 @@ function resizeCanvases() {
   const width = els.video.videoWidth || 1280;
   const height = els.video.videoHeight || 720;
   const aspectRatio = `${width} / ${height}`;
-  els.mainCanvas.style.aspectRatio = aspectRatio;
-  els.pipCanvas.style.aspectRatio = aspectRatio;
-  els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-ratio", aspectRatio);
+  if (state.cameraAspectRatio !== aspectRatio) {
+    state.cameraAspectRatio = aspectRatio;
+    els.mainCanvas.style.aspectRatio = aspectRatio;
+    els.pipCanvas.style.aspectRatio = aspectRatio;
+    els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-ratio", aspectRatio);
+  }
   for (const canvas of [els.mainCanvas, capture]) {
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
