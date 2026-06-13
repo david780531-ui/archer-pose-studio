@@ -46,6 +46,8 @@ const DELAY_REPLAY_FORWARD_DRIFT_SEC = 0.65;
 const FALLBACK_DELAY_FPS = 30;
 const FALLBACK_FRAME_MAX_SIDE = 1280;
 const FALLBACK_JPEG_QUALITY = 0.72;
+const FACE_LANDMARK_INDEX_MAX = 10;
+const FACE_CENTER_SMOOTHING_ALPHA = 0.42;
 const MIN_DRAW_BEFORE_ANCHOR_MS = 220;
 const MIN_ANCHOR_BEFORE_RELEASE_MS = 260;
 const DRAW_TO_ANCHOR_CONFIRM_MS = 120;
@@ -70,6 +72,12 @@ const TASKS_VISION_URLS = [
 
 const LANDMARKS = {
   nose: 0,
+  leftEye: 2,
+  rightEye: 5,
+  leftEar: 7,
+  rightEar: 8,
+  mouthLeft: 9,
+  mouthRight: 10,
   leftShoulder: 11,
   rightShoulder: 12,
   leftElbow: 13,
@@ -117,6 +125,7 @@ const state = {
   cameraAspectRatio: "",
   lastLandmarks: null,
   lastDrawWrist: null,
+  smoothedFaceCenter: null,
   lastAnchorAt: 0,
   lastReleaseAt: 0,
   releaseResetSeen: true,
@@ -133,7 +142,7 @@ const metricDefs = [
   { id: "bowArmAngle", label: "持弓臂角度", unit: "deg", good: (v) => v >= 145 },
   { id: "drawElbowAngle", label: "拉弦肘角度", unit: "deg", good: (v) => v <= 95 },
   { id: "drawLength", label: "拉距", unit: "肩寬", good: (v) => v >= 1.15 },
-  { id: "drawWristNoseDistance", label: "腕鼻距", unit: "肩寬", good: (v) => v <= 0.55 },
+  { id: "drawWristFaceDistance", label: "腕臉距", unit: "肩寬", good: (v) => v <= 0.55 },
   { id: "drawWristShoulderHeight", label: "腕肩高差", unit: "肩寬", good: (v) => Math.abs(v) <= 0.28 },
   { id: "drawWristSpeed", label: "拉弦腕速度", unit: "/s" }
 ];
@@ -475,7 +484,7 @@ function compactMetrics(metrics = {}) {
     bowArmAngle: metrics.bowArmAngle,
     drawElbowAngle: metrics.drawElbowAngle,
     drawLength: metrics.drawLength,
-    drawWristNoseDistance: metrics.drawWristNoseDistance,
+    drawWristFaceDistance: metrics.drawWristFaceDistance,
     drawWristShoulderHeight: metrics.drawWristShoulderHeight,
     drawWristSpeed: metrics.drawWristSpeed
   };
@@ -696,6 +705,7 @@ async function startCamera() {
   els.video.srcObject = state.stream;
   await els.video.play();
   clearDelayBuffer();
+  state.smoothedFaceCenter = null;
   state.delayRecorderSupported = !!window.MediaRecorder && !isIOSDevice();
   state.delayFallbackActive = state.delayEnabled && (!state.delayRecorderSupported || isIOSDevice()) && state.delayFallbackSupported;
   state.delaySupportWarningShown = false;
@@ -732,6 +742,7 @@ function stopCamera() {
   state.stream = null;
   clearDelayBuffer();
   state.lastLandmarks = null;
+  state.smoothedFaceCenter = null;
   state.cameraAspectRatio = "";
   state.delayFallbackActive = false;
   els.cameraBtn.textContent = "啟動相機";
@@ -788,6 +799,77 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function midpoint(a, b) {
+  if (!a || !b) return null;
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+    z: ((a.z || 0) + (b.z || 0)) / 2,
+    visibility: Math.min(a.visibility ?? 1, b.visibility ?? 1)
+  };
+}
+
+function weightedPoint(parts) {
+  let total = 0;
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  let visibility = 0;
+  for (const { point: part, weight } of parts) {
+    if (!part || !Number.isFinite(part.x) || !Number.isFinite(part.y)) continue;
+    total += weight;
+    x += part.x * weight;
+    y += part.y * weight;
+    z += (part.z || 0) * weight;
+    visibility = Math.max(visibility, part.visibility ?? 0);
+  }
+  if (!total) return null;
+  return { x: x / total, y: y / total, z: z / total, visibility };
+}
+
+function estimateFaceCenter(landmarks, leftShoulder = null, rightShoulder = null, shoulderWidth = 1) {
+  const nose = point(landmarks, LANDMARKS.nose);
+  const eyeMid = midpoint(point(landmarks, LANDMARKS.leftEye), point(landmarks, LANDMARKS.rightEye));
+  const mouthMid = midpoint(point(landmarks, LANDMARKS.mouthLeft), point(landmarks, LANDMARKS.mouthRight));
+  const earMid = midpoint(point(landmarks, LANDMARKS.leftEar), point(landmarks, LANDMARKS.rightEar));
+  const center = weightedPoint([
+    { point: eyeMid, weight: 0.36 },
+    { point: nose, weight: 0.28 },
+    { point: mouthMid, weight: 0.26 },
+    { point: earMid, weight: 0.1 }
+  ]);
+  if (center) return center;
+  const shoulderMid = midpoint(leftShoulder, rightShoulder);
+  if (!shoulderMid) return null;
+  return {
+    x: shoulderMid.x,
+    y: shoulderMid.y - shoulderWidth * 0.65,
+    z: shoulderMid.z,
+    visibility: shoulderMid.visibility
+  };
+}
+
+function smoothFaceCenter(faceCenter, now) {
+  if (!faceCenter) {
+    state.smoothedFaceCenter = null;
+    return null;
+  }
+  const previous = state.smoothedFaceCenter;
+  if (!previous || now - previous.now > 450) {
+    state.smoothedFaceCenter = { ...faceCenter, now };
+    return state.smoothedFaceCenter;
+  }
+  const alpha = FACE_CENTER_SMOOTHING_ALPHA;
+  state.smoothedFaceCenter = {
+    x: previous.x + (faceCenter.x - previous.x) * alpha,
+    y: previous.y + (faceCenter.y - previous.y) * alpha,
+    z: previous.z + ((faceCenter.z || 0) - (previous.z || 0)) * alpha,
+    visibility: faceCenter.visibility,
+    now
+  };
+  return state.smoothedFaceCenter;
+}
+
 function angle(a, b, c) {
   if (!a || !b || !c) return NaN;
   const ab = { x: a.x - b.x, y: a.y - b.y };
@@ -820,12 +902,12 @@ function computeMetrics(landmarks, now) {
     elbow: point(landmarks, drawRight ? LANDMARKS.leftElbow : LANDMARKS.rightElbow),
     wrist: point(landmarks, drawRight ? LANDMARKS.leftWrist : LANDMARKS.rightWrist)
   };
-  const nose = point(landmarks, LANDMARKS.nose);
   const leftShoulder = point(landmarks, LANDMARKS.leftShoulder);
   const rightShoulder = point(landmarks, LANDMARKS.rightShoulder);
   const leftHip = point(landmarks, LANDMARKS.leftHip);
   const rightHip = point(landmarks, LANDMARKS.rightHip);
   const shoulderWidth = distance(leftShoulder, rightShoulder) || 1;
+  const faceCenter = smoothFaceCenter(estimateFaceCenter(landmarks, leftShoulder, rightShoulder, shoulderWidth), now);
   const last = state.lastDrawWrist;
   const dt = last ? Math.max(0.001, (now - last.now) / 1000) : 0;
   const speed = last && draw.wrist ? distance(draw.wrist, last) / dt / shoulderWidth : 0;
@@ -837,7 +919,7 @@ function computeMetrics(landmarks, now) {
     bowArmAngle: angle(bow.shoulder, bow.elbow, bow.wrist),
     drawElbowAngle: angle(draw.shoulder, draw.elbow, draw.wrist),
     drawLength,
-    drawWristNoseDistance: distance(draw.wrist, nose) / shoulderWidth,
+    drawWristFaceDistance: distance(draw.wrist, faceCenter) / shoulderWidth,
     drawWristShoulderHeight: draw.wrist && draw.shoulder ? (draw.wrist.y - draw.shoulder.y) / shoulderWidth : NaN,
     drawElbowY: draw.elbow && draw.shoulder ? (draw.elbow.y - draw.shoulder.y) / shoulderWidth : NaN,
     drawWristY: draw.wrist && draw.shoulder ? (draw.wrist.y - draw.shoulder.y) / shoulderWidth : NaN,
@@ -846,6 +928,7 @@ function computeMetrics(landmarks, now) {
     drawWristSpeed: speed,
     drawWrist: draw.wrist,
     bowWrist: bow.wrist,
+    faceCenter,
     shoulderWidth
   };
 }
@@ -858,7 +941,7 @@ function pushMetricHistory(metrics, now) {
   state.metricHistory.push({
     now,
     drawLength: metrics.drawLength,
-    drawWristNoseDistance: metrics.drawWristNoseDistance,
+    drawWristFaceDistance: metrics.drawWristFaceDistance,
     drawWristShoulderHeight: metrics.drawWristShoulderHeight,
     drawElbowY: metrics.drawElbowY,
     drawWristY: metrics.drawWristY,
@@ -980,14 +1063,14 @@ function setPhase(phase, confidence, now) {
 function updatePhase(metrics, now) {
   pushMetricHistory(metrics, now);
 
-  const hasPose = finite(metrics.drawLength) && finite(metrics.drawWristNoseDistance);
+  const hasPose = finite(metrics.drawLength) && finite(metrics.drawWristFaceDistance);
   const timeInPhase = now - state.lastPhaseAt;
   const movementWindowMs = 300;
   const trendWindowMs = 420;
   const anchorWindowMs = 260;
-  const resetSeen = metrics.drawLength < 0.72 || metrics.drawWristNoseDistance < 0.5;
+  const resetSeen = metrics.drawLength < 0.72 || metrics.drawWristFaceDistance < 0.5;
 
-  if (metrics.drawLength < 0.72 || metrics.drawWristNoseDistance < 0.5) {
+  if (metrics.drawLength < 0.72 || metrics.drawWristFaceDistance < 0.5) {
     state.releaseResetSeen = true;
     state.anchorSnapshot = null;
   }
@@ -1007,11 +1090,11 @@ function updatePhase(metrics, now) {
   }
 
   const releaseSpeed = metrics.drawWristSpeed;
-  const wristNoseSlope = slopeOver(trendWindowMs, now, "drawWristNoseDistance");
+  const wristFaceSlope = slopeOver(trendWindowMs, now, "drawWristFaceDistance");
   const releaseCandidate =
     timeInPhase >= MIN_ANCHOR_BEFORE_RELEASE_MS &&
     releaseSpeed >= 0.3 &&
-    wristNoseSlope >= 0.06;
+    wristFaceSlope >= 0.06;
   if (state.phase === "ANCHOR") {
     if (confirmStablePhase("RELEASE", releaseCandidate, now, ANCHOR_TO_RELEASE_CONFIRM_MS, 4)) {
       setPhase("RELEASE", 0.92, now);
@@ -1034,12 +1117,12 @@ function updatePhase(metrics, now) {
     metrics.bowArmAngle > 120;
 
   const drawLengthSlope = slopeOver(anchorWindowMs, now, "drawLength");
-  const noseCv = cvOver(anchorWindowMs, now, "drawWristNoseDistance");
+  const faceCv = cvOver(anchorWindowMs, now, "drawWristFaceDistance");
   const lengthCv = cvOver(anchorWindowMs, now, "drawLength");
   const anchorCandidate =
     Math.abs(drawLengthSlope) <= 0.2 &&
     metrics.drawWristShoulderHeight < 0.68 &&
-    noseCv <= 0.58 &&
+    faceCv <= 0.58 &&
     lengthCv <= 0.42 &&
     metrics.bowArmAngle >= 118 &&
     metrics.drawElbowAngle <= 160 &&
@@ -1056,7 +1139,7 @@ function updatePhase(metrics, now) {
     if (confirmStablePhase("ANCHOR", anchorReady, now, DRAW_TO_ANCHOR_CONFIRM_MS, 4)) {
       state.anchorSnapshot = {
         drawLength: metrics.drawLength,
-        drawWristNoseDistance: metrics.drawWristNoseDistance
+        drawWristFaceDistance: metrics.drawWristFaceDistance
       };
       setPhase("ANCHOR", 0.86, now);
       return;
@@ -1068,15 +1151,37 @@ function updatePhase(metrics, now) {
 function drawPose(canvasCtx, landmarks, width, height) {
   if (!state.poseEnabled || !landmarks || !DrawingUtils || !PoseLandmarker) return;
   const utils = new DrawingUtils(canvasCtx);
-  utils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, {
+  const bodyConnections = PoseLandmarker.POSE_CONNECTIONS.filter((connection) => {
+    const start = connection.start ?? connection[0];
+    const end = connection.end ?? connection[1];
+    return start > FACE_LANDMARK_INDEX_MAX && end > FACE_LANDMARK_INDEX_MAX;
+  });
+  const bodyLandmarks = landmarks.filter((_, index) => index > FACE_LANDMARK_INDEX_MAX);
+  utils.drawConnectors(landmarks, bodyConnections, {
     color: "#7dd3fc",
     lineWidth: Math.max(2, width / 420)
   });
-  utils.drawLandmarks(landmarks, {
+  utils.drawLandmarks(bodyLandmarks, {
     color: "#fbbf24",
     fillColor: "#22c55e",
     radius: Math.max(2, width / 260)
   });
+  const leftShoulder = point(landmarks, LANDMARKS.leftShoulder);
+  const rightShoulder = point(landmarks, LANDMARKS.rightShoulder);
+  const shoulderWidth = distance(leftShoulder, rightShoulder) || 1;
+  const faceCenter = estimateFaceCenter(landmarks, leftShoulder, rightShoulder, shoulderWidth);
+  if (faceCenter) {
+    const radius = Math.max(4, width / 180);
+    canvasCtx.save();
+    canvasCtx.beginPath();
+    canvasCtx.arc(faceCenter.x * width, faceCenter.y * height, radius, 0, Math.PI * 2);
+    canvasCtx.fillStyle = "#fb7185";
+    canvasCtx.strokeStyle = "#ffffff";
+    canvasCtx.lineWidth = Math.max(1.5, width / 520);
+    canvasCtx.fill();
+    canvasCtx.stroke();
+    canvasCtx.restore();
+  }
 }
 
 function drawWaitingFrame(targetCtx, width, height, label = "等待相機畫面") {
