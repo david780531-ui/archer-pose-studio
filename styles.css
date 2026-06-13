@@ -388,6 +388,13 @@ meter {
     display: grid;
   }
 
+  .viewer {
+    min-height: 0;
+    width: 100%;
+    max-width: min(100%, calc((100svh - 230px) * var(--camera-aspect-value, 1.777)));
+    margin-inline: auto;
+  }
+
   .panel {
     grid-template-columns: 1fr;
   }
@@ -421,9 +428,51 @@ meter {
   }
 }
 
+@media (max-width: 920px) and (orientation: landscape) {
+  .app-shell {
+    width: 100%;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .topbar {
+    padding: 8px 10px;
+  }
+
+  .brand-icon,
+  .brand p,
+  .status-strip {
+    display: none;
+  }
+
+  .control-rack {
+    gap: 6px;
+  }
+
+  .settings-grid {
+    display: none;
+  }
+
+  .viewer-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+    gap: 8px;
+  }
+
+  .viewer {
+    max-width: min(100%, calc((100svh - 130px) * var(--camera-aspect-value, 1.777)));
+  }
+
+  .metric-card {
+    min-height: 50px;
+    padding: 8px 10px;
+  }
+
+  .event-log {
+    max-height: 92px;
+  }
+}
+
 @media (max-width: 460px) {
-  .control-rack,
-  .settings-grid,
   .metric-board.rotated {
     grid-template-columns: 1fr;
   }

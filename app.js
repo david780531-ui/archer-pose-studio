@@ -44,7 +44,8 @@ const DELAY_SEGMENT_MS = 2000;
 const DELAY_BUFFER_EXTRA_MS = 2500;
 const DELAY_REPLAY_FORWARD_DRIFT_SEC = 0.65;
 const FALLBACK_DELAY_FPS = 30;
-const FALLBACK_FRAME_MAX_SIDE = 1280;
+const FALLBACK_PORTRAIT_FRAME_SIZE = { width: 1024, height: 720 };
+const FALLBACK_LANDSCAPE_FRAME_SIZE = { width: 720, height: 1024 };
 const FALLBACK_JPEG_QUALITY = 0.72;
 const FACE_LANDMARK_INDEX_MAX = 10;
 const FACE_CENTER_SMOOTHING_ALPHA = 0.42;
@@ -348,12 +349,26 @@ function isIOSDevice() {
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
-function fallbackFrameSize(width, height) {
-  const scale = Math.min(1, FALLBACK_FRAME_MAX_SIDE / Math.max(width, height));
-  return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale))
-  };
+function isPortraitScreen() {
+  return window.matchMedia?.("(orientation: portrait)")?.matches ?? window.innerHeight >= window.innerWidth;
+}
+
+function fallbackFrameSize() {
+  return isPortraitScreen() ? FALLBACK_PORTRAIT_FRAME_SIZE : FALLBACK_LANDSCAPE_FRAME_SIZE;
+}
+
+function drawImageContained(targetCtx, source, targetWidth, targetHeight) {
+  const sourceWidth = source.videoWidth || source.width;
+  const sourceHeight = source.videoHeight || source.height;
+  if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return;
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const dx = (targetWidth - drawWidth) / 2;
+  const dy = (targetHeight - drawHeight) / 2;
+  targetCtx.fillStyle = "#020617";
+  targetCtx.fillRect(0, 0, targetWidth, targetHeight);
+  targetCtx.drawImage(source, dx, dy, drawWidth, drawHeight);
 }
 
 function enableFallbackDelay(reason) {
@@ -543,12 +558,12 @@ function captureFallbackFrame(now, landmarks, metrics) {
     return;
   }
 
-  const size = fallbackFrameSize(capture.width, capture.height);
+  const size = fallbackFrameSize();
   if (fallbackCapture.width !== size.width || fallbackCapture.height !== size.height) {
     fallbackCapture.width = size.width;
     fallbackCapture.height = size.height;
   }
-  fallbackCaptureCtx.drawImage(capture, 0, 0, size.width, size.height);
+  drawImageContained(fallbackCaptureCtx, capture, size.width, size.height);
   state.fallbackEncoding = true;
   state.lastFallbackFrameAt = now;
   fallbackCapture.toBlob((blob) => {
@@ -767,6 +782,7 @@ function resizeCanvases() {
     els.mainCanvas.style.aspectRatio = aspectRatio;
     els.pipCanvas.style.aspectRatio = aspectRatio;
     els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-ratio", aspectRatio);
+    els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-value", String(width / height));
   }
   for (const canvas of [els.mainCanvas, capture]) {
     if (canvas.width !== width || canvas.height !== height) {
@@ -1210,7 +1226,7 @@ function drawDecodedFrame(targetCtx, decoded, width, height, landmarks = null) {
     drawWaitingFrame(targetCtx, width, height, "正在累積延遲回看");
     return;
   }
-  targetCtx.drawImage(decoded.image, 0, 0, width, height);
+  drawImageContained(targetCtx, decoded.image, width, height);
   drawPose(targetCtx, landmarks, width, height);
 }
 
