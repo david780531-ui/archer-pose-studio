@@ -50,9 +50,9 @@ const FALLBACK_JPEG_QUALITY = 0.72;
 const FACE_LANDMARK_INDEX_MAX = 10;
 const FACE_CENTER_SMOOTHING_ALPHA = 0.42;
 const MIN_DRAW_BEFORE_ANCHOR_MS = 220;
-const MIN_ANCHOR_BEFORE_RELEASE_MS = 260;
+const MIN_ANCHOR_BEFORE_RELEASE_MS = 160;
 const DRAW_TO_ANCHOR_CONFIRM_MS = 120;
-const ANCHOR_TO_RELEASE_CONFIRM_MS = 160;
+const ANCHOR_TO_RELEASE_CONFIRM_MS = 70;
 const RECORDER_MIME_TYPES = [
   "video/mp4;codecs=avc1.42E01E",
   "video/mp4",
@@ -131,6 +131,7 @@ const state = {
   lastAnchorAt: 0,
   lastReleaseAt: 0,
   releaseResetSeen: true,
+  releaseImpulseUntil: 0,
   drawStartSnapshot: null,
   anchorSnapshot: null,
   candidate: { phase: null, since: 0, count: 0 },
@@ -1128,6 +1129,9 @@ function setPhase(phase, confidence, now) {
     if (phase !== "DRAW") {
       state.drawStartSnapshot = null;
     }
+    if (phase !== "ANCHOR") {
+      state.releaseImpulseUntil = 0;
+    }
     if (phase === "ANCHOR") {
       state.lastAnchorAt = now;
     }
@@ -1153,6 +1157,7 @@ function updatePhase(metrics, now) {
 
   if (restPoseSeen) {
     state.releaseResetSeen = true;
+    state.releaseImpulseUntil = 0;
     state.drawStartSnapshot = null;
     state.anchorSnapshot = null;
   }
@@ -1171,14 +1176,21 @@ function updatePhase(metrics, now) {
     return;
   }
 
-  const releaseSpeed = metrics.drawWristSpeed;
-  const wristFaceSlope = slopeOver(trendWindowMs, now, "drawWristFaceDistance");
-  const releaseCandidate =
-    timeInPhase >= MIN_ANCHOR_BEFORE_RELEASE_MS &&
-    releaseSpeed >= 0.3 &&
-    wristFaceSlope >= 0.06;
   if (state.phase === "ANCHOR") {
-    if (confirmStablePhase("RELEASE", releaseCandidate, now, ANCHOR_TO_RELEASE_CONFIRM_MS, 4)) {
+    const releaseTrendWindowMs = 240;
+    const releaseSpeed = metrics.drawWristSpeed;
+    const wristFaceSlope = slopeOver(trendWindowMs, now, "drawWristFaceDistance");
+    const wristFaceFastSlope = slopeOver(releaseTrendWindowMs, now, "drawWristFaceDistance");
+    const wristFaceDelta = deltaOver(releaseTrendWindowMs, now, "drawWristFaceDistance");
+    const releaseImpulse =
+      timeInPhase >= MIN_ANCHOR_BEFORE_RELEASE_MS &&
+      (
+        (releaseSpeed >= 0.24 && (wristFaceSlope >= 0.035 || wristFaceFastSlope >= 0.045 || wristFaceDelta >= 0.026)) ||
+        (releaseSpeed >= 0.46 && (wristFaceFastSlope >= 0.015 || wristFaceDelta >= 0.012))
+      );
+    if (releaseImpulse) state.releaseImpulseUntil = now + 240;
+    const releaseCandidate = now <= state.releaseImpulseUntil;
+    if (confirmPhase("RELEASE", releaseCandidate, now, ANCHOR_TO_RELEASE_CONFIRM_MS)) {
       setPhase("RELEASE", 0.92, now);
       return;
     }
