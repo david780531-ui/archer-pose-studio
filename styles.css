@@ -475,3 +475,112 @@ meter {
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 920px) {
+  body.camera-running .topbar,
+  body.camera-running .settings-grid {
+    display: none;
+  }
+
+  body.camera-running .viewer-grid {
+    gap: 0;
+  }
+
+  body.camera-running .panel {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    width: 100%;
+    max-width: min(100%, 720px);
+    min-height: 120px;
+    margin-inline: auto;
+    padding: 0;
+    overflow: visible;
+  }
+
+  body.camera-running .metric-board {
+    display: contents;
+  }
+
+  body.camera-running .event-log,
+  body.camera-running .phase-card meter {
+    display: none;
+  }
+
+  body.camera-running .phase-card,
+  body.camera-running .metric-card {
+    min-height: 60px;
+    height: 60px;
+    padding: 0;
+    gap: 0;
+    border: 2px solid #10131a;
+    border-radius: 10px;
+    background: #1118278c;
+    box-shadow: inset 0 0 0 1px #e2e8f036, inset 0 0 0 2px #ffffff0f;
+    display: grid;
+    grid-template-rows: 22px 30px;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    overflow: hidden;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  body.camera-running .phase-label,
+  body.camera-running .metric-name {
+    width: 100%;
+    min-width: 0;
+    padding: 0 4px;
+    color: #e5e7eb;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 22px;
+    text-align: center;
+    text-transform: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body.camera-running #phaseValue,
+  body.camera-running .metric-value {
+    width: 100%;
+    min-width: 0;
+    color: #fff;
+    font-size: 17px;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body.camera-running .phase-card[data-phase="INIT"] {
+    background: linear-gradient(135deg, #f8fafc3d, #94a3b84d);
+    box-shadow: inset 0 0 0 1px #e2e8f094, inset 0 0 0 2px #ffffff0f;
+  }
+
+  body.camera-running .phase-card[data-phase="DRAW"] {
+    background: linear-gradient(135deg, #0ea5e952, #2563eb66);
+    box-shadow: inset 0 0 0 1px #7dd3fca3, inset 0 0 0 2px #ffffff0f;
+  }
+
+  body.camera-running .phase-card[data-phase="ANCHOR"] {
+    background: linear-gradient(135deg, #f59e0b57, #f973166b);
+    box-shadow: inset 0 0 0 1px #fbbf24ad, inset 0 0 0 2px #ffffff0f;
+  }
+
+  body.camera-running .phase-card[data-phase="RELEASE"] {
+    background: linear-gradient(135deg, #22c55e57, #10b9816b);
+    box-shadow: inset 0 0 0 1px #86efacad, inset 0 0 0 2px #ffffff0f;
+  }
+
+  body.camera-running .metric-card.good {
+    background: linear-gradient(135deg, #14b8a652, #06b6d461);
+  }
+
+  body.camera-running .metric-card.warn {
+    background: linear-gradient(135deg, #47556973, #1f29378c);
+  }
+}

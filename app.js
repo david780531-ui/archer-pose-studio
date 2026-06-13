@@ -157,6 +157,7 @@ function logEvent(text) {
 }
 
 function setStatus() {
+  document.body.classList.toggle("camera-running", state.running);
   els.cameraStatus.textContent = state.running ? "相機運作中" : "相機未啟動";
   els.modelStatus.textContent = state.poseLandmarker ? "高精度模型已載入 · 30 FPS" : "高精度模型未載入";
   els.delayValue.textContent = `${(state.delayMs / 1000).toFixed(1)}s`;
