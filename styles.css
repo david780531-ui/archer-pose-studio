@@ -193,6 +193,7 @@ select {
 .viewer {
   position: relative;
   min-height: 260px;
+  aspect-ratio: var(--camera-aspect-ratio, 16 / 9);
   border: 1px solid #020617;
   border-radius: 8px;
   overflow: hidden;
@@ -207,7 +208,10 @@ select {
 #mainCanvas {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: auto;
+  max-height: calc(100svh - 250px);
+  aspect-ratio: var(--camera-aspect-ratio, 16 / 9);
+  object-fit: contain;
   background: #020617;
 }
 
@@ -219,7 +223,8 @@ select {
   width: 26%;
   min-width: 150px;
   max-width: 320px;
-  aspect-ratio: 16 / 9;
+  height: auto;
+  aspect-ratio: var(--camera-aspect-ratio, 16 / 9);
   border: 2px solid #f8fafc66;
   border-radius: 8px;
   background: #030712;

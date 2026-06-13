@@ -574,6 +574,10 @@ async function switchCamera() {
 function resizeCanvases() {
   const width = els.video.videoWidth || 1280;
   const height = els.video.videoHeight || 720;
+  const aspectRatio = `${width} / ${height}`;
+  els.mainCanvas.style.aspectRatio = aspectRatio;
+  els.pipCanvas.style.aspectRatio = aspectRatio;
+  els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-ratio", aspectRatio);
   for (const canvas of [els.mainCanvas, capture]) {
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
