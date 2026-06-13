@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10131a" />
+    <meta name="description" content="瀏覽器端射箭姿態分析工具：相機、延遲回看、姿態骨架、階段辨識與訓練指標。" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <title>Archer Pose Studio</title>
+    <link rel="stylesheet" href="./styles.css?v=22" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar" aria-label="主控台">
+        <div class="brand">
+          <img src="./icon.svg" alt="" class="brand-icon" />
+          <div>
+            <h1>Archer Pose Studio</h1>
+            <p>射箭姿態分析、延遲回看與訓練指標</p>
+          </div>
+        </div>
+        <div class="status-strip">
+          <span id="cameraStatus">相機未啟動</span>
+          <span id="modelStatus">模型未載入</span>
+        </div>
+      </section>
+
+      <section class="control-rack" aria-label="控制項">
+        <button id="cameraBtn" class="primary">啟動相機</button>
+        <button id="switchBtn">切換鏡頭</button>
+        <button id="delayBtn" class="toggle active">延遲回看</button>
+        <button id="pipBtn" class="toggle">即時畫中畫</button>
+        <button id="poseBtn" class="toggle active">姿態骨架</button>
+      </section>
+
+      <section class="settings-grid" aria-label="設定">
+        <label>
+          <span>延遲秒數</span>
+          <input id="delaySlider" type="range" min="0" max="12" step="0.5" value="3" />
+          <output id="delayValue">3.0s</output>
+        </label>
+        <label>
+          <span>拉弦手</span>
+          <select id="drawHandSelect">
+            <option value="right" selected>右手拉弦</option>
+            <option value="left">左手拉弦</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="viewer-grid">
+        <div class="viewer">
+          <video id="video" playsinline muted></video>
+          <canvas id="mainCanvas"></canvas>
+          <canvas id="pipCanvas" class="pip-canvas" width="320" height="180"></canvas>
+          <div class="canvas-label" id="canvasLabel">延遲 3.0s</div>
+          <button id="rotateBtn" class="rotate-btn" title="切換直向/橫向指標">旋轉指標</button>
+        </div>
+
+        <aside class="panel">
+          <div class="phase-card" id="phaseCard">
+            <span class="phase-label">階段</span>
+            <strong id="phaseValue">INIT</strong>
+            <meter id="phaseConfidence" min="0" max="1" value="0"></meter>
+          </div>
+          <div class="metric-board" id="metricBoard" aria-label="姿態指標"></div>
+          <div class="event-log" id="eventLog" aria-live="polite"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js?v=22"></script>
+  </body>
+</html>
