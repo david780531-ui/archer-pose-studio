@@ -1145,9 +1145,9 @@ function updatePhase(metrics, now) {
   const movementWindowMs = 300;
   const trendWindowMs = 420;
   const anchorWindowMs = 260;
-  const resetSeen = metrics.drawLength < 0.72 || metrics.drawWristFaceDistance < 0.5;
+  const restPoseSeen = metrics.drawLength < 0.68;
 
-  if (metrics.drawLength < 0.72 || metrics.drawWristFaceDistance < 0.5) {
+  if (restPoseSeen) {
     state.releaseResetSeen = true;
     state.anchorSnapshot = null;
   }
@@ -1162,7 +1162,7 @@ function updatePhase(metrics, now) {
       state.confidence = 0.72;
       return;
     }
-    if (resetSeen || timeInPhase > 2200) setPhase("INIT", 0.28, now);
+    if (restPoseSeen || timeInPhase > 2200) setPhase("INIT", 0.28, now);
     return;
   }
 
@@ -1177,7 +1177,8 @@ function updatePhase(metrics, now) {
       setPhase("RELEASE", 0.92, now);
       return;
     }
-    if (resetSeen && timeInPhase > 500) setPhase("INIT", 0.3, now);
+    const anchorResetCandidate = timeInPhase > 900 && restPoseSeen;
+    if (confirmStablePhase("INIT", anchorResetCandidate, now, 360, 8)) setPhase("INIT", 0.3, now);
     else state.confidence = 0.78;
     return;
   }
