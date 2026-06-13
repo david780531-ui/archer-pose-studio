@@ -31,6 +31,8 @@ const ctx = els.mainCanvas.getContext("2d");
 const pipCtx = els.pipCanvas.getContext("2d");
 const capture = document.createElement("canvas");
 const captureCtx = capture.getContext("2d", { willReadFrequently: false });
+const fallbackCapture = document.createElement("canvas");
+const fallbackCaptureCtx = fallbackCapture.getContext("2d", { willReadFrequently: false });
 const delayVideo = document.createElement("video");
 delayVideo.muted = true;
 delayVideo.playsInline = true;
@@ -41,6 +43,9 @@ delayVideo.setAttribute("playsinline", "");
 const DELAY_SEGMENT_MS = 2000;
 const DELAY_BUFFER_EXTRA_MS = 2500;
 const DELAY_REPLAY_FORWARD_DRIFT_SEC = 0.65;
+const FALLBACK_DELAY_FPS = 15;
+const FALLBACK_FRAME_MAX_SIDE = 1280;
+const FALLBACK_JPEG_QUALITY = 0.82;
 const MIN_DRAW_BEFORE_ANCHOR_MS = 220;
 const MIN_ANCHOR_BEFORE_RELEASE_MS = 260;
 const DRAW_TO_ANCHOR_CONFIRM_MS = 120;
@@ -90,7 +95,16 @@ const state = {
   delayRecorder: null,
   delayRecorderTimer: null,
   delayRecorderMimeType: "",
-  delayRecorderSupported: !!window.MediaRecorder,
+  delayRecorderSupported: !!window.MediaRecorder && !isIOSDevice(),
+  delayFallbackSupported: !!window.HTMLCanvasElement?.prototype?.toBlob,
+  delayFallbackActive: false,
+  delayFallbackWarningShown: false,
+  delayFallbackDecodeWarningShown: false,
+  fallbackFrames: [],
+  fallbackEncoding: false,
+  lastFallbackFrameAt: 0,
+  fallbackDisplayFrame: null,
+  fallbackDisplayImage: null,
   delaySupportWarningShown: false,
   delayRecorderGeneration: 0,
   replaySegment: null,
@@ -137,11 +151,15 @@ function setStatus() {
   els.delayValue.textContent = `${(state.delayMs / 1000).toFixed(1)}s`;
   const canShowCompressedDelay =
     state.delayEnabled && state.delayRecorderSupported && state.delayMs >= DELAY_SEGMENT_MS;
+  const canShowFallbackDelay =
+    state.delayEnabled && state.delayFallbackActive && state.delayMs >= DELAY_SEGMENT_MS;
   els.canvasLabel.textContent =
     canShowCompressedDelay
       ? `延遲 ${(state.delayMs / 1000).toFixed(1)}s · 壓縮30FPS`
+      : canShowFallbackDelay
+        ? `延遲 ${(state.delayMs / 1000).toFixed(1)}s · iPhone相容`
       : "即時畫面";
-  els.delayBtn.classList.toggle("active", canShowCompressedDelay);
+  els.delayBtn.classList.toggle("active", canShowCompressedDelay || canShowFallbackDelay);
   els.pipBtn.classList.toggle("active", state.pipEnabled);
   els.poseBtn.classList.toggle("active", state.poseEnabled);
   els.pipCanvas.classList.toggle("visible", state.pipEnabled && state.running);
@@ -268,9 +286,24 @@ function revokeSegment(segment) {
   }
 }
 
+function releaseFallbackDisplayImage() {
+  state.fallbackDisplayImage?.close?.();
+  state.fallbackDisplayImage = null;
+  state.fallbackDisplayFrame = null;
+}
+
+function clearFallbackFrames() {
+  state.fallbackFrames = [];
+  state.fallbackEncoding = false;
+  state.lastFallbackFrameAt = 0;
+  state.delayFallbackDecodeWarningShown = false;
+  releaseFallbackDisplayImage();
+}
+
 function clearDelayBuffer() {
   state.videoSegments.forEach(revokeSegment);
   state.videoSegments = [];
+  clearFallbackFrames();
   state.poseSamples = [];
   state.replaySegment = null;
   state.replayPendingSeek = 0;
@@ -283,15 +316,54 @@ function clearDelayBuffer() {
 
 function pruneDelayBuffer(now) {
   const maxAge = state.delayMs + DELAY_BUFFER_EXTRA_MS + DELAY_SEGMENT_MS;
+  const maxFallbackFrames = Math.ceil((maxAge / 1000) * FALLBACK_DELAY_FPS) + 4;
   const minTime = now - maxAge;
   while (state.videoSegments.length && state.videoSegments[0].end < minTime) {
     const removed = state.videoSegments.shift();
     if (removed === state.replaySegment) state.replaySegment = null;
     revokeSegment(removed);
   }
+  while (state.fallbackFrames.length && state.fallbackFrames[0].time < minTime) {
+    state.fallbackFrames.shift();
+  }
+  while (state.fallbackFrames.length > maxFallbackFrames) {
+    state.fallbackFrames.shift();
+  }
   while (state.poseSamples.length && state.poseSamples[0].time < minTime) {
     state.poseSamples.shift();
   }
+}
+
+function isIOSDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function fallbackFrameSize(width, height) {
+  const scale = Math.min(1, FALLBACK_FRAME_MAX_SIDE / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale))
+  };
+}
+
+function enableFallbackDelay(reason) {
+  stopDelayRecorder(false);
+  state.delayRecorderSupported = false;
+  state.delayFallbackActive = state.delayFallbackSupported;
+  if (!state.delayFallbackActive) {
+    if (!state.delaySupportWarningShown) {
+      logEvent("此瀏覽器不支援延遲回看，改顯示即時畫面");
+      state.delaySupportWarningShown = true;
+    }
+    setStatus();
+    return;
+  }
+  if (!state.delayFallbackWarningShown) {
+    logEvent(reason || "使用 iPhone 相容延遲回看");
+    state.delayFallbackWarningShown = true;
+  }
+  setStatus();
 }
 
 function stopDelayRecorder(storeCurrentSegment = false) {
@@ -321,12 +393,7 @@ function startDelayRecorderSegment() {
     return;
   }
   if (!window.MediaRecorder) {
-    state.delayRecorderSupported = false;
-    if (!state.delaySupportWarningShown) {
-      logEvent("此瀏覽器不支援壓縮延遲回看，改顯示即時畫面");
-      state.delaySupportWarningShown = true;
-    }
-    setStatus();
+    enableFallbackDelay("此瀏覽器不支援壓縮錄影，已切換 iPhone 相容延遲");
     return;
   }
 
@@ -348,7 +415,7 @@ function startDelayRecorderSegment() {
 
     recorder.addEventListener("error", (event) => {
       logEvent(`壓縮回看錄製錯誤：${event.error?.message || "MediaRecorder error"}`);
-      stopDelayRecorder(false);
+      enableFallbackDelay("壓縮回看錄製錯誤，已切換 iPhone 相容延遲");
     });
 
     recorder.addEventListener("stop", () => {
@@ -387,9 +454,7 @@ function startDelayRecorderSegment() {
     }, DELAY_SEGMENT_MS);
   } catch (error) {
     state.delayRecorder = null;
-    state.delayRecorderSupported = false;
-    logEvent(`壓縮延遲回看不可用：${error.message}`);
-    setStatus();
+    enableFallbackDelay(`壓縮延遲回看不可用，已切換 iPhone 相容延遲：${error.message}`);
   }
 }
 
@@ -439,6 +504,108 @@ function nearestPoseSample(targetTime) {
     if (state.poseSamples[i].time < targetTime && delta > bestDelta) break;
   }
   return best;
+}
+
+function nearestFallbackFrame(targetTime) {
+  if (!state.fallbackFrames.length) return null;
+  let best = state.fallbackFrames[0];
+  let bestDelta = Math.abs(best.time - targetTime);
+  for (let i = state.fallbackFrames.length - 1; i >= 0; i -= 1) {
+    const delta = Math.abs(state.fallbackFrames[i].time - targetTime);
+    if (delta < bestDelta) {
+      best = state.fallbackFrames[i];
+      bestDelta = delta;
+    }
+    if (state.fallbackFrames[i].time < targetTime && delta > bestDelta) break;
+  }
+  return best;
+}
+
+function captureFallbackFrame(now, landmarks, metrics) {
+  if (
+    !state.delayEnabled ||
+    !state.delayFallbackActive ||
+    state.delayMs < DELAY_SEGMENT_MS ||
+    state.fallbackEncoding ||
+    now - state.lastFallbackFrameAt < 1000 / FALLBACK_DELAY_FPS ||
+    !capture.width ||
+    !capture.height
+  ) {
+    return;
+  }
+
+  const size = fallbackFrameSize(capture.width, capture.height);
+  if (fallbackCapture.width !== size.width || fallbackCapture.height !== size.height) {
+    fallbackCapture.width = size.width;
+    fallbackCapture.height = size.height;
+  }
+  fallbackCaptureCtx.drawImage(capture, 0, 0, size.width, size.height);
+  state.fallbackEncoding = true;
+  state.lastFallbackFrameAt = now;
+  fallbackCapture.toBlob((blob) => {
+    state.fallbackEncoding = false;
+    if (!blob || !state.running || !state.delayEnabled || !state.delayFallbackActive) return;
+    state.fallbackFrames.push({
+      time: now,
+      blob,
+      landmarks: compactLandmarks(landmarks),
+      metrics: compactMetrics(metrics)
+    });
+    pruneDelayBuffer(performance.now());
+  }, "image/jpeg", FALLBACK_JPEG_QUALITY);
+}
+
+async function decodeFallbackFrame(frame) {
+  if (!frame) return null;
+  if (state.fallbackDisplayFrame === frame && state.fallbackDisplayImage) {
+    return state.fallbackDisplayImage;
+  }
+  releaseFallbackDisplayImage();
+  if (window.createImageBitmap) {
+    const bitmap = await createImageBitmap(frame.blob);
+    state.fallbackDisplayFrame = frame;
+    state.fallbackDisplayImage = {
+      image: bitmap,
+      close: () => bitmap.close?.()
+    };
+    return state.fallbackDisplayImage;
+  }
+  const url = URL.createObjectURL(frame.blob);
+  const image = new Image();
+  image.decoding = "async";
+  image.src = url;
+  if (image.decode) {
+    await image.decode();
+  } else {
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+    });
+  }
+  state.fallbackDisplayFrame = frame;
+  state.fallbackDisplayImage = {
+    image,
+    close: () => URL.revokeObjectURL(url)
+  };
+  return state.fallbackDisplayImage;
+}
+
+async function currentFallbackReplay(now) {
+  if (!state.delayEnabled || !state.delayFallbackActive || state.delayMs < DELAY_SEGMENT_MS) return null;
+  const targetTime = now - state.delayMs;
+  const frame = nearestFallbackFrame(targetTime);
+  if (!frame) return null;
+  let decoded = null;
+  try {
+    decoded = await decodeFallbackFrame(frame);
+  } catch (error) {
+    if (!state.delayFallbackDecodeWarningShown) {
+      logEvent(`iPhone相容回看解碼失敗，暫時顯示即時畫面：${error.message || "decode error"}`);
+      state.delayFallbackDecodeWarningShown = true;
+    }
+    return null;
+  }
+  return decoded ? { frame, decoded, sample: frame } : null;
 }
 
 function segmentForTime(targetTime) {
@@ -501,7 +668,7 @@ function currentDelayReplay(now) {
 }
 
 function shouldHoldReplayFrame() {
-  return state.delayEnabled && state.delayRecorderSupported && state.hasReplayFrame;
+  return state.delayEnabled && (state.delayRecorderSupported || state.delayFallbackActive) && state.hasReplayFrame;
 }
 
 delayVideo.addEventListener("loadedmetadata", () => {
@@ -529,16 +696,22 @@ async function startCamera() {
   els.video.srcObject = state.stream;
   await els.video.play();
   clearDelayBuffer();
-  state.delayRecorderSupported = !!window.MediaRecorder;
+  state.delayRecorderSupported = !!window.MediaRecorder && !isIOSDevice();
+  state.delayFallbackActive = state.delayEnabled && (!state.delayRecorderSupported || isIOSDevice()) && state.delayFallbackSupported;
   state.delaySupportWarningShown = false;
+  state.delayFallbackWarningShown = false;
   state.delayRecorderGeneration += 1;
   state.running = true;
   els.cameraBtn.disabled = false;
   els.cameraBtn.textContent = "停止相機";
   setStatus();
   logEvent("相機已啟動");
-  if (state.delayEnabled && !state.delayRecorderSupported && !state.delaySupportWarningShown) {
-    logEvent("此瀏覽器不支援壓縮延遲回看，改顯示即時畫面");
+  if (state.delayEnabled && state.delayFallbackActive && !state.delayFallbackWarningShown) {
+    logEvent(isIOSDevice() ? "iPhone 使用相容延遲回看" : "壓縮錄影不可用，使用相容延遲回看");
+    state.delayFallbackWarningShown = true;
+    setStatus();
+  } else if (state.delayEnabled && !state.delayRecorderSupported && !state.delayFallbackActive && !state.delaySupportWarningShown) {
+    logEvent("此瀏覽器不支援延遲回看，改顯示即時畫面");
     state.delaySupportWarningShown = true;
     setStatus();
   } else if (state.delayEnabled) {
@@ -560,6 +733,7 @@ function stopCamera() {
   clearDelayBuffer();
   state.lastLandmarks = null;
   state.cameraAspectRatio = "";
+  state.delayFallbackActive = false;
   els.cameraBtn.textContent = "啟動相機";
   clearCanvas();
   setStatus();
@@ -925,6 +1099,16 @@ function drawVideoFrame(targetCtx, video, width, height, landmarks = null) {
   drawPose(targetCtx, landmarks, width, height);
 }
 
+function drawDecodedFrame(targetCtx, decoded, width, height, landmarks = null) {
+  targetCtx.clearRect(0, 0, width, height);
+  if (!decoded?.image) {
+    drawWaitingFrame(targetCtx, width, height, "正在累積延遲回看");
+    return;
+  }
+  targetCtx.drawImage(decoded.image, 0, 0, width, height);
+  drawPose(targetCtx, landmarks, width, height);
+}
+
 function drawLiveFrame(targetCtx, width, height, landmarks = null) {
   targetCtx.clearRect(0, 0, width, height);
   const source = capture.width && capture.height ? capture : els.video;
@@ -950,8 +1134,14 @@ async function loop(now) {
     if (replay) {
       drawVideoFrame(ctx, replay.video, els.mainCanvas.width, els.mainCanvas.height, replay.sample?.landmarks);
       state.hasReplayFrame = true;
-    } else if (!shouldHoldReplayFrame()) {
-      drawLiveFrame(ctx, els.mainCanvas.width, els.mainCanvas.height, state.lastLandmarks);
+    } else {
+      const fallbackReplay = await currentFallbackReplay(renderTime);
+      if (fallbackReplay) {
+        drawDecodedFrame(ctx, fallbackReplay.decoded, els.mainCanvas.width, els.mainCanvas.height, fallbackReplay.sample?.landmarks);
+        state.hasReplayFrame = true;
+      } else if (!shouldHoldReplayFrame()) {
+        drawLiveFrame(ctx, els.mainCanvas.width, els.mainCanvas.height, state.lastLandmarks);
+      }
     }
     if (state.pipEnabled) drawLiveFrame(pipCtx, els.pipCanvas.width, els.pipCanvas.height, state.lastLandmarks);
     return;
@@ -970,6 +1160,7 @@ async function loop(now) {
   state.lastMetrics = { ...metrics, phase: state.phase };
   state.lastLandmarks = compactLandmarks(landmarks);
   pushPoseSample(sampleTime, landmarks, state.lastMetrics);
+  captureFallbackFrame(sampleTime, landmarks, state.lastMetrics);
   startDelayRecorderSegment();
   pruneDelayBuffer(sampleTime);
 
@@ -977,12 +1168,19 @@ async function loop(now) {
   if (replay) {
     drawVideoFrame(ctx, replay.video, els.mainCanvas.width, els.mainCanvas.height, replay.sample?.landmarks);
     state.hasReplayFrame = true;
-  } else if (!shouldHoldReplayFrame()) {
-    drawLiveFrame(ctx, els.mainCanvas.width, els.mainCanvas.height, state.lastLandmarks);
+  } else {
+    const fallbackReplay = await currentFallbackReplay(sampleTime);
+    if (fallbackReplay) {
+      drawDecodedFrame(ctx, fallbackReplay.decoded, els.mainCanvas.width, els.mainCanvas.height, fallbackReplay.sample?.landmarks);
+      state.hasReplayFrame = true;
+    } else if (!shouldHoldReplayFrame()) {
+      drawLiveFrame(ctx, els.mainCanvas.width, els.mainCanvas.height, state.lastLandmarks);
+    }
   }
   if (state.pipEnabled) drawLiveFrame(pipCtx, els.pipCanvas.width, els.pipCanvas.height, state.lastLandmarks);
   const heldSample = shouldHoldReplayFrame() ? nearestPoseSample(sampleTime - state.delayMs) : null;
-  renderMetrics(replay?.sample?.metrics || heldSample?.metrics || state.lastMetrics);
+  const fallbackSample = state.delayFallbackActive ? nearestFallbackFrame(sampleTime - state.delayMs) : null;
+  renderMetrics(replay?.sample?.metrics || fallbackSample?.metrics || heldSample?.metrics || state.lastMetrics);
 }
 
 function formatMetric(metric, value) {
@@ -1054,12 +1252,18 @@ els.delayBtn.addEventListener("click", () => {
   if (!state.delayEnabled) {
     stopDelayRecorder(false);
     clearDelayBuffer();
+    state.delayFallbackActive = false;
   } else if (state.running) {
-    state.delayRecorderSupported = !!window.MediaRecorder;
+    state.delayRecorderSupported = !!window.MediaRecorder && !isIOSDevice();
+    state.delayFallbackActive = (!state.delayRecorderSupported || isIOSDevice()) && state.delayFallbackSupported;
     state.delaySupportWarningShown = false;
+    state.delayFallbackWarningShown = false;
     state.delayRecorderGeneration += 1;
-    if (!state.delayRecorderSupported) {
-      logEvent("此瀏覽器不支援壓縮延遲回看，改顯示即時畫面");
+    if (state.delayFallbackActive) {
+      logEvent(isIOSDevice() ? "iPhone 使用相容延遲回看" : "壓縮錄影不可用，使用相容延遲回看");
+      state.delayFallbackWarningShown = true;
+    } else if (!state.delayRecorderSupported) {
+      logEvent("此瀏覽器不支援延遲回看，改顯示即時畫面");
       state.delaySupportWarningShown = true;
     } else {
       startDelayRecorderSegment();
