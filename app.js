@@ -43,9 +43,9 @@ delayVideo.setAttribute("playsinline", "");
 const DELAY_SEGMENT_MS = 2000;
 const DELAY_BUFFER_EXTRA_MS = 2500;
 const DELAY_REPLAY_FORWARD_DRIFT_SEC = 0.65;
-const FALLBACK_DELAY_FPS = 15;
+const FALLBACK_DELAY_FPS = 30;
 const FALLBACK_FRAME_MAX_SIDE = 1280;
-const FALLBACK_JPEG_QUALITY = 0.82;
+const FALLBACK_JPEG_QUALITY = 0.72;
 const MIN_DRAW_BEFORE_ANCHOR_MS = 220;
 const MIN_ANCHOR_BEFORE_RELEASE_MS = 260;
 const DRAW_TO_ANCHOR_CONFIRM_MS = 120;
@@ -157,7 +157,7 @@ function setStatus() {
     canShowCompressedDelay
       ? `延遲 ${(state.delayMs / 1000).toFixed(1)}s · 壓縮30FPS`
       : canShowFallbackDelay
-        ? `延遲 ${(state.delayMs / 1000).toFixed(1)}s · iPhone相容`
+        ? `延遲 ${(state.delayMs / 1000).toFixed(1)}s · iPhone相容30FPS`
       : "即時畫面";
   els.delayBtn.classList.toggle("active", canShowCompressedDelay || canShowFallbackDelay);
   els.pipBtn.classList.toggle("active", state.pipEnabled);
