@@ -436,12 +436,6 @@ meter {
   }
 
   .topbar {
-    padding: 8px 10px;
-  }
-
-  .brand-icon,
-  .brand p,
-  .status-strip {
     display: none;
   }
 
@@ -454,12 +448,16 @@ meter {
   }
 
   .viewer-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+    grid-template-columns: 1fr;
     gap: 8px;
   }
 
+  .panel {
+    display: none;
+  }
+
   .viewer {
-    max-width: min(100%, calc((100svh - 130px) * var(--camera-aspect-value, 1.777)));
+    max-width: min(100%, calc((100svh - 70px) * var(--camera-aspect-value, 1.777)));
   }
 
   .metric-card {

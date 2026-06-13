@@ -44,8 +44,8 @@ const DELAY_SEGMENT_MS = 2000;
 const DELAY_BUFFER_EXTRA_MS = 2500;
 const DELAY_REPLAY_FORWARD_DRIFT_SEC = 0.65;
 const FALLBACK_DELAY_FPS = 30;
-const FALLBACK_PORTRAIT_FRAME_SIZE = { width: 1024, height: 720 };
-const FALLBACK_LANDSCAPE_FRAME_SIZE = { width: 720, height: 1024 };
+const PORTRAIT_FRAME_SIZE = { width: 1024, height: 720 };
+const LANDSCAPE_FRAME_SIZE = { width: 720, height: 1024 };
 const FALLBACK_JPEG_QUALITY = 0.72;
 const FACE_LANDMARK_INDEX_MAX = 10;
 const FACE_CENTER_SMOOTHING_ALPHA = 0.42;
@@ -124,6 +124,7 @@ const state = {
   lastPhaseAt: 0,
   lastAnalysisAt: 0,
   cameraAspectRatio: "",
+  captureDrawRect: null,
   lastLandmarks: null,
   lastDrawWrist: null,
   smoothedFaceCenter: null,
@@ -204,11 +205,12 @@ async function requestCameraStream() {
     throw new Error("此瀏覽器不支援 navigator.mediaDevices.getUserMedia");
   }
 
+  const preferredSize = displayFrameSize();
   const preferred = {
     video: {
       facingMode: { ideal: state.facingMode },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: preferredSize.width },
+      height: { ideal: preferredSize.height },
       frameRate: { ideal: 30 }
     },
     audio: false
@@ -353,22 +355,51 @@ function isPortraitScreen() {
   return window.matchMedia?.("(orientation: portrait)")?.matches ?? window.innerHeight >= window.innerWidth;
 }
 
-function fallbackFrameSize() {
-  return isPortraitScreen() ? FALLBACK_PORTRAIT_FRAME_SIZE : FALLBACK_LANDSCAPE_FRAME_SIZE;
+function displayFrameSize() {
+  return isPortraitScreen() ? PORTRAIT_FRAME_SIZE : LANDSCAPE_FRAME_SIZE;
 }
 
-function drawImageContained(targetCtx, source, targetWidth, targetHeight) {
+function containedDrawRect(source, targetWidth, targetHeight) {
   const sourceWidth = source.videoWidth || source.width;
   const sourceHeight = source.videoHeight || source.height;
-  if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return;
+  if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return null;
   const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
   const drawWidth = sourceWidth * scale;
   const drawHeight = sourceHeight * scale;
-  const dx = (targetWidth - drawWidth) / 2;
-  const dy = (targetHeight - drawHeight) / 2;
+  return {
+    x: (targetWidth - drawWidth) / 2,
+    y: (targetHeight - drawHeight) / 2,
+    width: drawWidth,
+    height: drawHeight
+  };
+}
+
+function drawImageContained(targetCtx, source, targetWidth, targetHeight) {
+  const rect = containedDrawRect(source, targetWidth, targetHeight);
+  if (!rect) return null;
   targetCtx.fillStyle = "#020617";
   targetCtx.fillRect(0, 0, targetWidth, targetHeight);
-  targetCtx.drawImage(source, dx, dy, drawWidth, drawHeight);
+  targetCtx.drawImage(source, rect.x, rect.y, rect.width, rect.height);
+  return rect;
+}
+
+function projectLandmarksToRect(landmarks, rect, width, height) {
+  if (!landmarks || !rect || !width || !height) return landmarks;
+  return landmarks.map((lm) => ({
+    ...lm,
+    x: (rect.x + lm.x * rect.width) / width,
+    y: (rect.y + lm.y * rect.height) / height
+  }));
+}
+
+function projectRectToTarget(sourceRect, sourceWidth, sourceHeight, targetRect) {
+  if (!sourceRect || !sourceWidth || !sourceHeight || !targetRect) return targetRect;
+  return {
+    x: targetRect.x + (sourceRect.x / sourceWidth) * targetRect.width,
+    y: targetRect.y + (sourceRect.y / sourceHeight) * targetRect.height,
+    width: (sourceRect.width / sourceWidth) * targetRect.width,
+    height: (sourceRect.height / sourceHeight) * targetRect.height
+  };
 }
 
 function enableFallbackDelay(reason) {
@@ -558,7 +589,7 @@ function captureFallbackFrame(now, landmarks, metrics) {
     return;
   }
 
-  const size = fallbackFrameSize();
+  const size = displayFrameSize();
   if (fallbackCapture.width !== size.width || fallbackCapture.height !== size.height) {
     fallbackCapture.width = size.width;
     fallbackCapture.height = size.height;
@@ -572,6 +603,8 @@ function captureFallbackFrame(now, landmarks, metrics) {
     state.fallbackFrames.push({
       time: now,
       blob,
+      drawRect: state.captureDrawRect,
+      frameSize: size,
       landmarks: compactLandmarks(landmarks),
       metrics: compactMetrics(metrics)
     });
@@ -757,6 +790,7 @@ function stopCamera() {
   state.stream = null;
   clearDelayBuffer();
   state.lastLandmarks = null;
+  state.captureDrawRect = null;
   state.smoothedFaceCenter = null;
   state.cameraAspectRatio = "";
   state.delayFallbackActive = false;
@@ -773,17 +807,19 @@ async function switchCamera() {
   await startCamera();
 }
 
-function resizeCanvases() {
-  const width = els.video.videoWidth || 1280;
-  const height = els.video.videoHeight || 720;
+function syncDisplayFrameAspect() {
+  const { width, height } = displayFrameSize();
   const aspectRatio = `${width} / ${height}`;
-  if (state.cameraAspectRatio !== aspectRatio) {
-    state.cameraAspectRatio = aspectRatio;
-    els.mainCanvas.style.aspectRatio = aspectRatio;
-    els.pipCanvas.style.aspectRatio = aspectRatio;
-    els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-ratio", aspectRatio);
-    els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-value", String(width / height));
-  }
+  state.cameraAspectRatio = aspectRatio;
+  els.mainCanvas.style.aspectRatio = aspectRatio;
+  els.pipCanvas.style.aspectRatio = aspectRatio;
+  els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-ratio", aspectRatio);
+  els.mainCanvas.parentElement?.style.setProperty("--camera-aspect-value", String(width / height));
+  return { width, height };
+}
+
+function resizeCanvases() {
+  const { width, height } = syncDisplayFrameAspect();
   for (const canvas of [els.mainCanvas, capture]) {
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
@@ -1164,16 +1200,17 @@ function updatePhase(metrics, now) {
   }
 }
 
-function drawPose(canvasCtx, landmarks, width, height) {
+function drawPose(canvasCtx, landmarks, width, height, drawRect = null) {
   if (!state.poseEnabled || !landmarks || !DrawingUtils || !PoseLandmarker) return;
+  const renderLandmarks = projectLandmarksToRect(landmarks, drawRect, width, height);
   const utils = new DrawingUtils(canvasCtx);
   const bodyConnections = PoseLandmarker.POSE_CONNECTIONS.filter((connection) => {
     const start = connection.start ?? connection[0];
     const end = connection.end ?? connection[1];
     return start > FACE_LANDMARK_INDEX_MAX && end > FACE_LANDMARK_INDEX_MAX;
   });
-  const bodyLandmarks = landmarks.filter((_, index) => index > FACE_LANDMARK_INDEX_MAX);
-  utils.drawConnectors(landmarks, bodyConnections, {
+  const bodyLandmarks = renderLandmarks.filter((_, index) => index > FACE_LANDMARK_INDEX_MAX);
+  utils.drawConnectors(renderLandmarks, bodyConnections, {
     color: "#7dd3fc",
     lineWidth: Math.max(2, width / 420)
   });
@@ -1182,10 +1219,10 @@ function drawPose(canvasCtx, landmarks, width, height) {
     fillColor: "#22c55e",
     radius: Math.max(2, width / 260)
   });
-  const leftShoulder = point(landmarks, LANDMARKS.leftShoulder);
-  const rightShoulder = point(landmarks, LANDMARKS.rightShoulder);
+  const leftShoulder = point(renderLandmarks, LANDMARKS.leftShoulder);
+  const rightShoulder = point(renderLandmarks, LANDMARKS.rightShoulder);
   const shoulderWidth = distance(leftShoulder, rightShoulder) || 1;
-  const faceCenter = estimateFaceCenter(landmarks, leftShoulder, rightShoulder, shoulderWidth);
+  const faceCenter = estimateFaceCenter(renderLandmarks, leftShoulder, rightShoulder, shoulderWidth);
   if (faceCenter) {
     const radius = Math.max(4, width / 180);
     canvasCtx.save();
@@ -1216,26 +1253,27 @@ function drawVideoFrame(targetCtx, video, width, height, landmarks = null) {
     drawWaitingFrame(targetCtx, width, height, "正在累積延遲回看");
     return;
   }
-  targetCtx.drawImage(video, 0, 0, width, height);
-  drawPose(targetCtx, landmarks, width, height);
+  const drawRect = drawImageContained(targetCtx, video, width, height);
+  drawPose(targetCtx, landmarks, width, height, drawRect);
 }
 
-function drawDecodedFrame(targetCtx, decoded, width, height, landmarks = null) {
+function drawDecodedFrame(targetCtx, decoded, width, height, landmarks = null, sourcePoseRect = null) {
   targetCtx.clearRect(0, 0, width, height);
   if (!decoded?.image) {
     drawWaitingFrame(targetCtx, width, height, "正在累積延遲回看");
     return;
   }
-  drawImageContained(targetCtx, decoded.image, width, height);
-  drawPose(targetCtx, landmarks, width, height);
+  const drawRect = drawImageContained(targetCtx, decoded.image, width, height);
+  const poseRect = projectRectToTarget(sourcePoseRect, decoded.image.width, decoded.image.height, drawRect);
+  drawPose(targetCtx, landmarks, width, height, poseRect);
 }
 
 function drawLiveFrame(targetCtx, width, height, landmarks = null) {
   targetCtx.clearRect(0, 0, width, height);
-  const source = capture.width && capture.height ? capture : els.video;
+  const source = els.video;
   if (source.width || source.videoWidth) {
-    targetCtx.drawImage(source, 0, 0, width, height);
-    drawPose(targetCtx, landmarks, width, height);
+    const drawRect = drawImageContained(targetCtx, source, width, height);
+    drawPose(targetCtx, landmarks, width, height, drawRect);
     return;
   }
   drawWaitingFrame(targetCtx, width, height);
@@ -1258,7 +1296,14 @@ async function loop(now) {
     } else {
       const fallbackReplay = await currentFallbackReplay(renderTime);
       if (fallbackReplay) {
-        drawDecodedFrame(ctx, fallbackReplay.decoded, els.mainCanvas.width, els.mainCanvas.height, fallbackReplay.sample?.landmarks);
+        drawDecodedFrame(
+          ctx,
+          fallbackReplay.decoded,
+          els.mainCanvas.width,
+          els.mainCanvas.height,
+          fallbackReplay.sample?.landmarks,
+          fallbackReplay.frame?.drawRect
+        );
         state.hasReplayFrame = true;
       } else if (!shouldHoldReplayFrame()) {
         drawLiveFrame(ctx, els.mainCanvas.width, els.mainCanvas.height, state.lastLandmarks);
@@ -1269,7 +1314,7 @@ async function loop(now) {
   }
   state.lastAnalysisAt = now;
 
-  captureCtx.drawImage(els.video, 0, 0, capture.width, capture.height);
+  state.captureDrawRect = drawImageContained(captureCtx, els.video, capture.width, capture.height);
   let landmarks = null;
   if (state.poseLandmarker) {
     const result = state.poseLandmarker.detectForVideo(els.video, performance.now());
@@ -1292,7 +1337,14 @@ async function loop(now) {
   } else {
     const fallbackReplay = await currentFallbackReplay(sampleTime);
     if (fallbackReplay) {
-      drawDecodedFrame(ctx, fallbackReplay.decoded, els.mainCanvas.width, els.mainCanvas.height, fallbackReplay.sample?.landmarks);
+      drawDecodedFrame(
+        ctx,
+        fallbackReplay.decoded,
+        els.mainCanvas.width,
+        els.mainCanvas.height,
+        fallbackReplay.sample?.landmarks,
+        fallbackReplay.frame?.drawRect
+      );
       state.hasReplayFrame = true;
     } else if (!shouldHoldReplayFrame()) {
       drawLiveFrame(ctx, els.mainCanvas.width, els.mainCanvas.height, state.lastLandmarks);
@@ -1412,9 +1464,12 @@ els.delaySlider.addEventListener("input", () => {
   setStatus();
 });
 els.rotateBtn.addEventListener("click", () => els.metricBoard.classList.toggle("rotated"));
+window.addEventListener("resize", syncDisplayFrameAspect);
+window.addEventListener("orientationchange", syncDisplayFrameAspect);
 
 bindDrag();
 installPwa();
 renderMetrics();
+syncDisplayFrameAspect();
 setStatus();
 clearCanvas();
