@@ -477,13 +477,39 @@ meter {
 }
 
 @media (max-width: 920px) {
+  body.camera-running .app-shell {
+    width: 100%;
+    padding: 0;
+    gap: 0;
+  }
+
   body.camera-running .topbar,
   body.camera-running .settings-grid {
     display: none;
   }
 
+  body.camera-running .control-rack {
+    gap: 6px;
+    padding: 8px;
+  }
+
   body.camera-running .viewer-grid {
     gap: 0;
+  }
+
+  body.camera-running .viewer {
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  body.camera-running #mainCanvas {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   body.camera-running .panel {
@@ -491,7 +517,7 @@ meter {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
     width: 100%;
-    max-width: min(100%, 720px);
+    max-width: 100%;
     min-height: 120px;
     margin-inline: auto;
     padding: 0;

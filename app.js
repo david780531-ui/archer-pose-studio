@@ -131,6 +131,7 @@ const state = {
   lastAnchorAt: 0,
   lastReleaseAt: 0,
   releaseResetSeen: true,
+  drawStartSnapshot: null,
   anchorSnapshot: null,
   candidate: { phase: null, since: 0, count: 0 },
   lastMetrics: {},
@@ -1125,6 +1126,9 @@ function setPhase(phase, confidence, now) {
   if (previous !== phase) {
     state.lastPhaseAt = now;
     state.candidate = { phase: null, since: 0, count: 0 };
+    if (phase !== "DRAW") {
+      state.drawStartSnapshot = null;
+    }
     if (phase === "ANCHOR") {
       state.lastAnchorAt = now;
     }
@@ -1150,6 +1154,7 @@ function updatePhase(metrics, now) {
 
   if (restPoseSeen) {
     state.releaseResetSeen = true;
+    state.drawStartSnapshot = null;
     state.anchorSnapshot = null;
   }
 
@@ -1203,7 +1208,25 @@ function updatePhase(metrics, now) {
   const drawLengthSlope = slopeOver(anchorWindowMs, now, "drawLength");
   const faceCv = cvOver(anchorWindowMs, now, "drawWristFaceDistance");
   const lengthCv = cvOver(anchorWindowMs, now, "drawLength");
+  const drawStart = state.drawStartSnapshot;
+  const hasDrawStart =
+    drawStart &&
+    finite(drawStart.drawLength) &&
+    finite(drawStart.drawWristFaceDistance);
+  const drawLengthGain = hasDrawStart ? metrics.drawLength - drawStart.drawLength : 0;
+  const wristFaceGain = hasDrawStart ? drawStart.drawWristFaceDistance - metrics.drawWristFaceDistance : 0;
+  const wristNearAnchor = metrics.drawWristFaceDistance <= 0.78;
+  const anchorShapeReady =
+    metrics.drawLength >= 0.94 ||
+    metrics.drawElbowAngle <= 128 ||
+    drawLengthGain >= 0.14;
+  const pulledTowardAnchor =
+    hasDrawStart &&
+    (wristFaceGain >= 0.1 || (wristFaceGain >= 0.06 && drawLengthGain >= 0.12));
+  const enoughDrawTravel = metrics.drawLength >= 0.98 || drawLengthGain >= 0.16;
+  const drawHandReachedAnchor = (wristNearAnchor && anchorShapeReady) || (pulledTowardAnchor && enoughDrawTravel);
   const anchorCandidate =
+    drawHandReachedAnchor &&
     Math.abs(drawLengthSlope) <= 0.2 &&
     metrics.drawWristShoulderHeight < 0.68 &&
     faceCv <= 0.58 &&
@@ -1213,7 +1236,13 @@ function updatePhase(metrics, now) {
     metrics.drawLength >= 0.76;
 
   if (state.phase === "INIT") {
-    if (confirmPhase("DRAW", drawCandidate, now, 80)) setPhase("DRAW", 0.68, now);
+    if (confirmPhase("DRAW", drawCandidate, now, 80)) {
+      state.drawStartSnapshot = {
+        drawLength: metrics.drawLength,
+        drawWristFaceDistance: metrics.drawWristFaceDistance
+      };
+      setPhase("DRAW", 0.68, now);
+    }
     else state.confidence = 0.24;
     return;
   }
