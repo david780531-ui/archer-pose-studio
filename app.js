@@ -359,11 +359,11 @@ function displayFrameSize() {
   return isPortraitScreen() ? PORTRAIT_FRAME_SIZE : LANDSCAPE_FRAME_SIZE;
 }
 
-function containedDrawRect(source, targetWidth, targetHeight) {
+function coverDrawRect(source, targetWidth, targetHeight) {
   const sourceWidth = source.videoWidth || source.width;
   const sourceHeight = source.videoHeight || source.height;
   if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return null;
-  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
   const drawWidth = sourceWidth * scale;
   const drawHeight = sourceHeight * scale;
   return {
@@ -374,8 +374,8 @@ function containedDrawRect(source, targetWidth, targetHeight) {
   };
 }
 
-function drawImageContained(targetCtx, source, targetWidth, targetHeight) {
-  const rect = containedDrawRect(source, targetWidth, targetHeight);
+function drawImageCover(targetCtx, source, targetWidth, targetHeight) {
+  const rect = coverDrawRect(source, targetWidth, targetHeight);
   if (!rect) return null;
   targetCtx.fillStyle = "#020617";
   targetCtx.fillRect(0, 0, targetWidth, targetHeight);
@@ -594,7 +594,7 @@ function captureFallbackFrame(now, landmarks, metrics) {
     fallbackCapture.width = size.width;
     fallbackCapture.height = size.height;
   }
-  drawImageContained(fallbackCaptureCtx, capture, size.width, size.height);
+  drawImageCover(fallbackCaptureCtx, capture, size.width, size.height);
   state.fallbackEncoding = true;
   state.lastFallbackFrameAt = now;
   fallbackCapture.toBlob((blob) => {
@@ -1253,7 +1253,7 @@ function drawVideoFrame(targetCtx, video, width, height, landmarks = null) {
     drawWaitingFrame(targetCtx, width, height, "正在累積延遲回看");
     return;
   }
-  const drawRect = drawImageContained(targetCtx, video, width, height);
+  const drawRect = drawImageCover(targetCtx, video, width, height);
   drawPose(targetCtx, landmarks, width, height, drawRect);
 }
 
@@ -1263,7 +1263,7 @@ function drawDecodedFrame(targetCtx, decoded, width, height, landmarks = null, s
     drawWaitingFrame(targetCtx, width, height, "正在累積延遲回看");
     return;
   }
-  const drawRect = drawImageContained(targetCtx, decoded.image, width, height);
+  const drawRect = drawImageCover(targetCtx, decoded.image, width, height);
   const poseRect = projectRectToTarget(sourcePoseRect, decoded.image.width, decoded.image.height, drawRect);
   drawPose(targetCtx, landmarks, width, height, poseRect);
 }
@@ -1272,7 +1272,7 @@ function drawLiveFrame(targetCtx, width, height, landmarks = null) {
   targetCtx.clearRect(0, 0, width, height);
   const source = els.video;
   if (source.width || source.videoWidth) {
-    const drawRect = drawImageContained(targetCtx, source, width, height);
+    const drawRect = drawImageCover(targetCtx, source, width, height);
     drawPose(targetCtx, landmarks, width, height, drawRect);
     return;
   }
@@ -1314,7 +1314,7 @@ async function loop(now) {
   }
   state.lastAnalysisAt = now;
 
-  state.captureDrawRect = drawImageContained(captureCtx, els.video, capture.width, capture.height);
+  state.captureDrawRect = drawImageCover(captureCtx, els.video, capture.width, capture.height);
   let landmarks = null;
   if (state.poseLandmarker) {
     const result = state.poseLandmarker.detectForVideo(els.video, performance.now());
