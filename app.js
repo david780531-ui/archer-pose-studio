@@ -140,7 +140,6 @@ const state = {
 };
 
 const metricDefs = [
-  { id: "phase", label: "階段", unit: "" },
   { id: "shoulderHipAngle", label: "肩髖平行", unit: "deg", good: (v) => v <= 12 },
   { id: "bowArmAngle", label: "持弓臂角度", unit: "deg", good: (v) => v >= 145 },
   { id: "drawElbowAngle", label: "拉弦肘角度", unit: "deg", good: (v) => v <= 95 },
@@ -1215,16 +1214,20 @@ function updatePhase(metrics, now) {
     finite(drawStart.drawWristFaceDistance);
   const drawLengthGain = hasDrawStart ? metrics.drawLength - drawStart.drawLength : 0;
   const wristFaceGain = hasDrawStart ? drawStart.drawWristFaceDistance - metrics.drawWristFaceDistance : 0;
-  const wristNearAnchor = metrics.drawWristFaceDistance <= 0.78;
+  const drawLengthGainReady =
+    drawLengthGain >= 0.14 ||
+    (metrics.drawLength >= 1.08 && drawLengthGain >= 0.08);
+  const wristApproachedAnchor =
+    wristFaceGain >= 0.08 ||
+    metrics.drawWristFaceDistance <= 0.62;
   const anchorShapeReady =
-    metrics.drawLength >= 0.94 ||
-    metrics.drawElbowAngle <= 128 ||
-    drawLengthGain >= 0.14;
-  const pulledTowardAnchor =
+    metrics.drawLength >= 0.96 ||
+    metrics.drawElbowAngle <= 138;
+  const drawHandReachedAnchor =
     hasDrawStart &&
-    (wristFaceGain >= 0.1 || (wristFaceGain >= 0.06 && drawLengthGain >= 0.12));
-  const enoughDrawTravel = metrics.drawLength >= 0.98 || drawLengthGain >= 0.16;
-  const drawHandReachedAnchor = (wristNearAnchor && anchorShapeReady) || (pulledTowardAnchor && enoughDrawTravel);
+    drawLengthGainReady &&
+    wristApproachedAnchor &&
+    anchorShapeReady;
   const anchorCandidate =
     drawHandReachedAnchor &&
     Math.abs(drawLengthSlope) <= 0.2 &&
@@ -1233,7 +1236,7 @@ function updatePhase(metrics, now) {
     lengthCv <= 0.42 &&
     metrics.bowArmAngle >= 118 &&
     metrics.drawElbowAngle <= 160 &&
-    metrics.drawLength >= 0.76;
+    metrics.drawLength >= 0.88;
 
   if (state.phase === "INIT") {
     if (confirmPhase("DRAW", drawCandidate, now, 80)) {
