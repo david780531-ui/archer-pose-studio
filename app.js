@@ -1187,12 +1187,17 @@ function updatePhase(metrics, now) {
   const drawWristUp = -slopeOver(movementWindowMs, now, "drawWristY");
   const bowElbowUp = -slopeOver(movementWindowMs, now, "bowElbowY");
   const bowWristUp = -slopeOver(movementWindowMs, now, "bowWristY");
+  const bowRaised =
+    metrics.bowWristY <= 0.42 &&
+    metrics.bowElbowY <= 0.55 &&
+    metrics.bowArmAngle >= 132;
   const drawCandidate =
+    bowRaised &&
     drawElbowUp >= 0.08 &&
     drawWristUp >= 0.08 &&
     bowElbowUp >= 0.05 &&
     bowWristUp >= 0.05 &&
-    metrics.bowArmAngle > 120;
+    metrics.drawLength >= 0.72;
 
   const drawLengthSlope = slopeOver(anchorWindowMs, now, "drawLength");
   const faceCv = cvOver(anchorWindowMs, now, "drawWristFaceDistance");
