@@ -61,14 +61,13 @@ const RECORDER_MIME_TYPES = [
   "video/webm"
 ];
 
-const FULL_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task";
+const FULL_MODEL_URL = new URL("./models/pose_landmarker_full.task", import.meta.url).toString();
+const TASKS_VISION_WASM_URL = new URL("./vendor/mediapipe/tasks-vision/wasm", import.meta.url).toString();
 
 const TASKS_VISION_URLS = [
+  new URL("./vendor/mediapipe/tasks-vision/vision_bundle.mjs", import.meta.url).toString(),
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs",
-  "https://unpkg.com/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs",
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs",
-  "https://unpkg.com/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs"
+  "https://unpkg.com/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs"
 ];
 
 const LANDMARKS = {
@@ -287,9 +286,7 @@ async function loadPoseModel() {
     }
     if (!PoseLandmarker) throw lastError || new Error("MediaPipe 模組載入失敗");
   }
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
-  );
+  const vision = await FilesetResolver.forVisionTasks(TASKS_VISION_WASM_URL);
   state.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: FULL_MODEL_URL,
