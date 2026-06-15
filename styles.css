@@ -293,6 +293,7 @@ select {
 
 #phaseValue {
   font-size: 34px;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
@@ -341,7 +342,9 @@ meter {
 .metric-value {
   font-size: 22px;
   font-weight: 850;
+  font-variant-numeric: tabular-nums;
   line-height: 1.05;
+  transition: color 0.18s ease;
 }
 
 .metric-card.good .metric-value {

@@ -53,6 +53,8 @@ const MIN_DRAW_BEFORE_ANCHOR_MS = 220;
 const MIN_ANCHOR_BEFORE_RELEASE_MS = 160;
 const DRAW_TO_ANCHOR_CONFIRM_MS = 120;
 const ANCHOR_TO_RELEASE_CONFIRM_MS = 70;
+const METRIC_DISPLAY_INTERVAL_MS = 100;
+const METRIC_DISPLAY_SMOOTHING_ALPHA = 0.24;
 const RECORDER_MIME_TYPES = [
   "video/mp4;codecs=avc1.42E01E",
   "video/mp4",
@@ -135,6 +137,8 @@ const state = {
   anchorSnapshot: null,
   candidate: { phase: null, since: 0, count: 0 },
   lastMetrics: {},
+  displayedMetrics: {},
+  lastMetricRenderAt: 0,
   metricHistory: [],
   drag: null
 };
@@ -1428,22 +1432,50 @@ function formatMetric(metric, value) {
   return value.toFixed(2);
 }
 
+function ensureMetricCards() {
+  if (els.metricBoard.childElementCount === metricDefs.length) return;
+  els.metricBoard.replaceChildren(
+    ...metricDefs.map((metric) => {
+      const card = document.createElement("div");
+      card.className = "metric-card";
+      card.dataset.metricId = metric.id;
+      card.innerHTML = `<span class="metric-name"></span><strong class="metric-value"></strong>`;
+      card.querySelector(".metric-name").textContent = metric.label;
+      card.querySelector(".metric-value").textContent = "--";
+      return card;
+    })
+  );
+}
+
+function smoothDisplayedMetric(metric, rawValue) {
+  if (!Number.isFinite(rawValue)) {
+    delete state.displayedMetrics[metric.id];
+    return NaN;
+  }
+  const previous = state.displayedMetrics[metric.id];
+  const value = Number.isFinite(previous)
+    ? previous + (rawValue - previous) * METRIC_DISPLAY_SMOOTHING_ALPHA
+    : rawValue;
+  state.displayedMetrics[metric.id] = value;
+  return value;
+}
+
 function renderMetrics(metrics = {}) {
   els.phaseValue.textContent = state.phase;
   els.phaseCard.dataset.phase = state.phase;
   els.phaseConfidence.value = state.confidence;
-  els.metricBoard.replaceChildren(
-    ...metricDefs.map((metric) => {
-      const value = metric.id === "phase" ? state.phase : metrics[metric.id];
-      const card = document.createElement("div");
-      card.className = "metric-card";
-      if (metric.good && Number.isFinite(value)) card.classList.add(metric.good(value) ? "good" : "warn");
-      card.innerHTML = `<span class="metric-name"></span><strong class="metric-value"></strong>`;
-      card.querySelector(".metric-name").textContent = metric.label;
-      card.querySelector(".metric-value").textContent = formatMetric(metric, value);
-      return card;
-    })
-  );
+  ensureMetricCards();
+  const now = performance.now();
+  if (now - state.lastMetricRenderAt < METRIC_DISPLAY_INTERVAL_MS) return;
+  state.lastMetricRenderAt = now;
+  metricDefs.forEach((metric) => {
+    const card = els.metricBoard.querySelector(`[data-metric-id="${metric.id}"]`);
+    if (!card) return;
+    const value = smoothDisplayedMetric(metric, metrics[metric.id]);
+    card.classList.remove("good", "warn");
+    if (metric.good && Number.isFinite(value)) card.classList.add(metric.good(value) ? "good" : "warn");
+    card.querySelector(".metric-value").textContent = formatMetric(metric, value);
+  });
 }
 
 function installPwa() {
