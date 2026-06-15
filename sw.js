@@ -1,4 +1,4 @@
-const CACHE_NAME = "archer-pose-studio-v41";
+const CACHE_NAME = "archer-pose-studio-v42";
 const ASSETS = [
   "./",
   "./index.html",

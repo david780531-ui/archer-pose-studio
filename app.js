@@ -1214,38 +1214,29 @@ function updatePhase(metrics, now) {
     metrics.drawLength >= 0.72;
 
   const drawLengthSlope = slopeOver(anchorWindowMs, now, "drawLength");
-  const faceCv = cvOver(anchorWindowMs, now, "drawWristFaceDistance");
   const lengthCv = cvOver(anchorWindowMs, now, "drawLength");
   const drawStart = state.drawStartSnapshot;
-  const hasDrawStart =
-    drawStart &&
-    finite(drawStart.drawLength) &&
-    finite(drawStart.drawWristFaceDistance);
+  const hasDrawStart = drawStart && finite(drawStart.drawLength);
   const drawLengthGain = hasDrawStart ? metrics.drawLength - drawStart.drawLength : 0;
-  const wristFaceGain = hasDrawStart ? drawStart.drawWristFaceDistance - metrics.drawWristFaceDistance : 0;
   const drawLengthGainReady =
-    drawLengthGain >= 0.14 ||
-    (metrics.drawLength >= 1.08 && drawLengthGain >= 0.08);
-  const wristApproachedAnchor =
-    wristFaceGain >= 0.08 ||
-    metrics.drawWristFaceDistance <= 0.62;
+    drawLengthGain >= 0.22 ||
+    (metrics.drawLength >= 1.1 && drawLengthGain >= 0.14);
   const anchorShapeReady =
-    metrics.drawLength >= 0.96 ||
-    metrics.drawElbowAngle <= 138;
+    metrics.drawLength >= 1.02 &&
+    metrics.drawElbowAngle <= 128 &&
+    Math.abs(metrics.drawWristShoulderHeight) <= 0.55;
+  const drawLengthSettled =
+    Math.abs(drawLengthSlope) <= 0.16 &&
+    lengthCv <= 0.24;
   const drawHandReachedAnchor =
     hasDrawStart &&
     drawLengthGainReady &&
-    wristApproachedAnchor &&
-    anchorShapeReady;
+    anchorShapeReady &&
+    drawLengthSettled;
   const anchorCandidate =
     drawHandReachedAnchor &&
-    Math.abs(drawLengthSlope) <= 0.2 &&
-    metrics.drawWristShoulderHeight < 0.68 &&
-    faceCv <= 0.58 &&
-    lengthCv <= 0.42 &&
     metrics.bowArmAngle >= 118 &&
-    metrics.drawElbowAngle <= 160 &&
-    metrics.drawLength >= 0.88;
+    metrics.drawLength >= 0.95;
 
   if (state.phase === "INIT") {
     if (confirmPhase("DRAW", drawCandidate, now, 80)) {
